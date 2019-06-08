@@ -1,0 +1,17 @@
+uwifimon:
+  attributes: 0
+  version:
+    major: 1
+    minor: 0
+  main:
+    start: module_start
+    stop: module_stop
+  modules:
+    uwifimon:
+      syscall: false
+      functions:
+        - uwifimon_get_iface_list
+        - uwifimon_ioctl
+        - uwifimon_cap_start
+        - uwifimon_cap_stop
+        - uwifimon_cap_status

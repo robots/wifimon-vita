@@ -1,0 +1,15 @@
+kwifimon:
+  attributes: 0
+  version:
+    major: 1
+    minor: 0
+  main:
+    start: module_start
+    stop: module_stop
+  modules:
+    kwifimon:
+      syscall: true
+      functions:
+        - kwifimon_cap_state
+        - kwifimon_cap_start
+        - kwifimon_cap_stop
