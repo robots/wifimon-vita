@@ -1,0 +1,27 @@
+#
+# NOTE! Please use 'git ls-files -i --exclude-standard'
+# command after changing this file, to see if there are
+# any tracked files which get ignored after the change.
+#
+
+# Standard ignores
+*.a
+*.la
+*.lo
+*.o
+*.pyc
+*.so
+*.cmd
+*.swp
+*.tgz
+*.ko
+*.mod.c
+*~
+
+# Ignore DEPS
+build
+wlan_src/.tmp_versions
+wlan_src/Module.markers
+wlan_src/Module.symvers
+wlan_src/modules.order
+io/sdio/syskt/modules.order

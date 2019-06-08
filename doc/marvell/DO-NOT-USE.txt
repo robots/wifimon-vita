@@ -1,0 +1,4 @@
+Please only submit existing firmware update to this directory.
+
+For new projects, please submit the latest marvell firmware to the
+third_party/linux-firmware project.
