@@ -8,27 +8,28 @@
 #include <vitasdkkern.h>
 #include <taihen.h>
 
-#include "../common/kwifimon_export.h"
+#include "kwifimon_export.h"
+#include "wlan_kernel.h"
+#include "assert.h"
+#include "radiotap.h"
+
 #include "kwifimon.h"
 #include "pcap.h"
+#include "knet.h"
 #include "m.h"
 
 #define MIN(x, y) ((x)<(y)?(x):(y))
 #define MAX_FILELEN 200
 
-//#define printf ksceDebugPrintf
-////static char log[128];
-
-#define HOOKS_NUMBER 2
+#define HOOKS_NUMBER 5
 static int uids[HOOKS_NUMBER];
 static int hooks_uid[HOOKS_NUMBER];
 static tai_hook_ref_t ref_hooks[HOOKS_NUMBER];
 
-
-int kwifimon_monitor_enabled = 0;
 uint32_t kwifimon_channel_freq;
 uint32_t kwifimon_channel_band;
-int kwifimon_recording = 0;
+// TODO: mutex?
+volatile int kwifimon_state = 0;
 
 // missing taihen prototype
 int module_get_offset(SceUID pid, SceUID modid, int segidx, size_t offset, uintptr_t *addr);
@@ -40,50 +41,31 @@ int (*wlan_cmd_wait)(struct wlan_dev_t *dev, struct wlan_cmd_t *cmd);
 struct wlan_cmd_t *(*wlan_cmd_alloc)(struct wlan_dev_t *dev, int cmd_len);
 int (*wlan_cmd_free)(struct wlan_dev_t *dev, struct wlan_cmd_t *cmd);
 
-void (*wlan_lock)(void *ptr);
-void (*wlan_unlock)(void *ptr);
+int (*wlan_lock)(struct wlan_lock_t *ptr);
+void (*wlan_unlock)(struct wlan_lock_t *ptr);
 
-int (*ksceKernelLibcGettimeofday)(struct timeval *ptimeval, void *ptimezone);
-
-/*
-void _log(const char *text, ...)
-{
-	va_list args;
-	va_start(args, text);
-	vsprintf(log, text, args);
-	va_end(args);
-}
-
-void kwifimon_get_log(char *dest)
-{
-	int state;
-	ENTER_SYSCALL(state);
-	ksceKernelMemcpyKernelToUser((uintptr_t)dest, log, sizeof(log));
-	EXIT_SYSCALL(state);
-}
-*/
-int kwifimon_cap_state(void)
+int kwifimon_mod_state(void)
 {
 	int state, ret;
 
 	ENTER_SYSCALL(state);
-	ret = kwifimon_recording;
+	ret = kwifimon_state;
 	EXIT_SYSCALL(state);
 
 	return ret;
 }
 
-int kwifimon_cap_start(char *file, int len)
+int kwifimon_cap_start(char *file)
 {
 	int state, ret;
 	char filename[MAX_FILELEN];
 
 	ENTER_SYSCALL(state);
 
-	ksceKernelMemcpyUserToKernel(filename, (uintptr_t)file, MIN(MAX_FILELEN, len));
+	ksceKernelStrncpyUserToKernel(filename, (uintptr_t)file, MAX_FILELEN);
 	ret = pcap_open(file);
 	if (ret == 0) {
-		kwifimon_recording = 1;
+		kwifimon_state |= STATE_REC_FILE;
 	}
 
 	EXIT_SYSCALL(state);
@@ -98,7 +80,38 @@ int kwifimon_cap_stop(void)
 	ENTER_SYSCALL(state);
 
 	pcap_close();
-	kwifimon_recording = 0;
+	kwifimon_state &= ~STATE_REC_FILE;
+	ret = 0;
+
+	EXIT_SYSCALL(state);
+
+	return ret;
+}
+
+int kwifimon_net_start(void)
+{
+	int state, ret;
+
+	ENTER_SYSCALL(state);
+
+	ret = knet_start(KWIFIMON_NET_PORT);
+	if (ret == 0) {
+		kwifimon_state |= STATE_REC_NET;
+	}
+
+	EXIT_SYSCALL(state);
+
+	return ret;
+}
+
+int kwifimon_net_stop(void)
+{
+	int state, ret;
+
+	ENTER_SYSCALL(state);
+
+	knet_stop();
+	kwifimon_state &= ~STATE_REC_NET;
 	ret = 0;
 
 	EXIT_SYSCALL(state);
@@ -204,7 +217,7 @@ int kwifimon_process_respose(struct wlan_dev_t *dev, uint8_t *pkt, int pkt_len, 
 */
 	// pkt or amsdu
 	if (rxt->pkt_type == 0 || rxt->pkt_type == 10) {
-		if (kwifimon_recording) {
+		if (kwifimon_state & (STATE_REC_FILE | STATE_REC_NET)) {
 			struct rxpd *rx_pd = (void *)pkt + sizeof(struct sdio_rx_t);
 			uint8_t *pkt = (void *)rx_pd + rx_pd->rx_pkt_offset;
 			uint32_t pkt_len = rx_pd->rx_pkt_length;
@@ -231,82 +244,112 @@ int kwifimon_process_respose(struct wlan_dev_t *dev, uint8_t *pkt, int pkt_len, 
 			radiotap.antnoise = rx_pd->nf;
 
 			// write to file
-			pcap_write_hdr(&radiotap.hdr, pkt_len);
-			pcap_write_data(pkt, pkt_len);
+			if (kwifimon_state & STATE_REC_FILE) {
+				pcap_write_rt(&radiotap.hdr, pkt, pkt_len);
+			}
+
+			if (kwifimon_state & STATE_REC_NET) {
+				knet_write_rt(&radiotap.hdr, pkt, pkt_len);
+			}
 		}
 	}
 	
-		
-	return TAI_CONTINUE(int, ref_hooks[0], dev, pkt, pkt_len, somenumber);
-
-	//turn ret;
+/*	
+	if (ref_hooks[1]) {
+		return TAI_CONTINUE(int, ref_hooks[1], dev, pkt, pkt_len, somenumber);
+	} else {
+		return 0;
+	}
+*/
+	return TAI_CONTINUE(int, ref_hooks[1], dev, pkt, pkt_len, somenumber);
 }
 
 // hooked ioctl function
 int kwifimon_ioctl(struct netdev_t *netdev, unsigned int req, uint8_t *buf, int buf_len)
 {
-	int ret = TAI_CONTINUE(int, ref_hooks[1], netdev, req, buf, buf_len);
+	int ret = -1;
+/*	if (ref_hooks[2]) {
+		ret = TAI_CONTINUE(int, ref_hooks[2], netdev, req, buf, buf_len);
+	}*/
+	ret = TAI_CONTINUE(int, ref_hooks[2], netdev, req, buf, buf_len);
 	
 	struct wlan_dev_t *dev = netdev->priv;
 
-	wlan_lock(&dev->wlan_lock);
+	int lockret = wlan_lock(&dev->wlan_lock);
+	if (lockret >= 0) {
+		if (req == WLAN_IOCTL_GET_MAC_CONTROL) {
+			if (buf_len >= 2) {
+				uint16_t mode = dev->current_mac_control;
+				memcpy(buf, &mode, 2);
+				ret = 0;
+			}
+		} else if (req == WLAN_IOCTL_SET_MAC_CONTROL) {
+			if (buf_len >= 2) {
+				uint16_t mode;
+				memcpy(&mode, buf, 2);
+				ret = kwifimon_mac_control(dev, mode); 
+			}
+		} else if (req == WLAN_IOCTL_SET_RF_CHANNEL) {
+			if (buf_len >= 4) {
+				uint16_t band;
+				uint16_t chan;
 
-	if (req == WLAN_IOCTL_GET_MAC_CONTROL) {
-		if (buf_len >= 2) {
-			uint16_t mode = dev->current_mac_control;
-			memcpy(buf, &mode, 2);
-		}
-	} else if (req == WLAN_IOCTL_SET_MAC_CONTROL) {
-		if (buf_len >= 2) {
-			uint16_t mode;
-			memcpy(&mode, buf, 2);
-			ret = kwifimon_mac_control(dev, mode); 
-		}
-	} else if (req == WLAN_IOCTL_SET_RF_CHANNEL) {
-		if (buf_len >= 4) {
-			uint16_t band;
-			uint16_t chan;
+				memcpy(&band, &buf[0], 2);
+				memcpy(&chan, &buf[2], 2);
+				if (m_chan_valid(chan, band)) {
+					ret = kwifimon_channel(dev, band, chan); 
+					if (ret >= 0) {
+						kwifimon_channel_freq = m_hwvalue_to_freq(chan, band);
+						kwifimon_channel_band = band;
+					}
+				}
+			}
+		} else if (req == WLAN_IOCTL_SET_MONITOR_MODE) {
+			if (buf_len >= 2) {
+				uint16_t mode;
+				memcpy(&mode, buf, 2);
+				ret = kwifimon_monitor_mode(dev, mode); 
 
-			memcpy(&band, &buf[0], 2);
-			memcpy(&chan, &buf[2], 2);
-			if (m_chan_valid(chan, band)) {
-				ret = kwifimon_channel(dev, band, chan); 
-				if (ret >= 0) {
-					kwifimon_channel_freq = m_hwvalue_to_freq(chan, band);
-					kwifimon_channel_band = band;
+				if (ret == 0) {
+					kwifimon_state |= STATE_MONITOR;
 				}
 			}
 		}
-	} else if (req == WLAN_IOCTL_SET_MONITOR_MODE) {
-		if (buf_len >= 2) {
-			uint16_t mode;
-			memcpy(&mode, buf, 2);
-			ret = kwifimon_monitor_mode(dev, mode); 
 
-			if (ret == 0) {
-				kwifimon_monitor_enabled = mode;
-			}
-		}
+		wlan_unlock(&dev->wlan_lock);
 	}
-
-	wlan_unlock(&dev->wlan_lock);
 
 	return ret;
 }
 
+/*
+int unload_allowed_patched(void)
+{
+	int ret;
+	ret = TAI_CONTINUE(int, ref_hooks[0]);
+	return 1; // always allowed
+}
+*/
 
 void _start() __attribute__ ((weak, alias ("module_start")));
 int module_start(SceSize argc, const void *args)
 {
+//	hooks_uid[0] = taiHookFunctionImportForKernel(KERNEL_PID, &ref_hooks[0], "SceKernelModulemgr", 0x11F9B314, 0xBBA13D9C, unload_allowed_patched);
+	STATIC_ASSERT((sizeof(struct netdev_t) == 0xb0), "Bad size of struct netdev_t!")
+//	STATIC_ASSERT((sizeof(struct netdev_2_t) == 0x360), "Bad size of struct netdev_2_t!")
+//	STATIC_ASSERT((sizeof(struct netdev_3_t) == 0x1f8), "Bad size of struct netdev_3_t!")
+	STATIC_ASSERT((sizeof(struct wlan_dev_t) == 0x1e30), "Bad size of struct wlan_dev_t!")
+	STATIC_ASSERT((offsetof(struct wlan_dev_t, wlan_lock) == 0x718), "Bad wlan_lock offset!")
+
 	tai_module_info_t tai_info;
 	
 	// first: fetch SceWlan stuff
 	memset(&tai_info,0,sizeof(tai_module_info_t));
 	tai_info.size = sizeof(tai_module_info_t);
-	if (taiGetModuleInfoForKernel(KERNEL_PID, "SceWlan", &tai_info) < 0) {
+	if (taiGetModuleInfoForKernel(KERNEL_PID, "SceWlanBt", &tai_info) < 0) {
+		kwifimon_state = STATE_ERROR;
 		return SCE_KERNEL_START_SUCCESS;
 	}
-
 	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x2954 | 1, (uintptr_t *)&wlan_cmd_alloc);
 	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x2A18 | 1, (uintptr_t *)&wlan_cmd_free);
 	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x2F44 | 1, (uintptr_t *)&wlan_cmd_send1);
@@ -315,14 +358,16 @@ int module_start(SceSize argc, const void *args)
 	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x0E50 | 1, (uintptr_t *)&wlan_lock);
 	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x0E70 | 1, (uintptr_t *)&wlan_unlock);
 
-	// hook wlan response handler
-	hooks_uid[0] = taiHookFunctionOffsetForKernel(KERNEL_PID, &ref_hooks[0], tai_info.modid, 0, 0xb3d8, 1, kwifimon_process_respose);
-	hooks_uid[1] = taiHookFunctionOffsetForKernel(KERNEL_PID, &ref_hooks[1], tai_info.modid, 0, 0x73f0, 1, kwifimon_ioctl);
+	hooks_uid[1] = taiHookFunctionOffsetForKernel(KERNEL_PID, &ref_hooks[1], tai_info.modid, 0, 0x1cd4, 1, kwifimon_process_respose);
+	hooks_uid[2] = taiHookFunctionOffsetForKernel(KERNEL_PID, &ref_hooks[2], tai_info.modid, 0, 0x73f0, 1, kwifimon_ioctl);
 
+
+/* not needed
 	// second: patch SceNetPS 
 	memset(&tai_info,0,sizeof(tai_module_info_t));
 	tai_info.size = sizeof(tai_module_info_t);
 	if (taiGetModuleInfoForKernel(KERNEL_PID, "SceNetPs", &tai_info) < 0) {
+		kwifimon_state = STATE_ERROR_1;
 		return SCE_KERNEL_START_SUCCESS;
 	}
 
@@ -330,9 +375,7 @@ int module_start(SceSize argc, const void *args)
 	uint32_t movs_a1_0_nop_opcode = 0xBF002000;
 	// patch access to sceNetSyscallControl (replace bl xxx with mov R0, 0; nop)
 	uids[0] = taiInjectDataForKernel(KERNEL_PID, tai_info.modid, 0, 0x2710, &movs_a1_0_nop_opcode, sizeof(movs_a1_0_nop_opcode));
-
-	// third: vitasdk doesnt have gettimeofdat :( (but newlib-vita does)
-	module_get_export_func(KERNEL_PID, "SceProcessmgrForKernel", 0x7A69DE86, 0xDE8B8B5E, (uintptr_t*)&ksceKernelLibcGettimeofday);
+*/
 
 	return SCE_KERNEL_START_SUCCESS;
 }
@@ -341,7 +384,8 @@ int module_stop(SceSize argc, const void *args) {
 	int i;
 
 	pcap_close();
-	kwifimon_recording = 0;
+	knet_stop();
+	kwifimon_state = 0;
 
 	i = HOOKS_NUMBER;
 	while (i--) {

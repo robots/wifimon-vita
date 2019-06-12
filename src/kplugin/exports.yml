@@ -10,6 +10,8 @@ kwifimon:
     kwifimon:
       syscall: true
       functions:
-        - kwifimon_cap_state
+        - kwifimon_mod_state
         - kwifimon_cap_start
         - kwifimon_cap_stop
+        - kwifimon_net_start
+        - kwifimon_net_stop

@@ -15,6 +15,10 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -O3 -std=gnu99")
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -nostdlib")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -fno-rtti -fno-exceptions")
 
+include_directories(
+  ../common
+)
+
 link_directories(
 	${CMAKE_CURRENT_BINARY_DIR}
 )
@@ -22,6 +26,7 @@ link_directories(
 add_executable(${PROJECT_NAME}
 	kwifimon.c
 	pcap.c
+	knet.c
 	m.c
 )
 
@@ -31,6 +36,8 @@ target_link_libraries(${PROJECT_NAME}
 	SceIofilemgrForDriver_stub
 	SceThreadmgrForDriver_stub
 	SceSysmemForDriver_stub
+	SceProcessmgrForKernel_stub
+	SceNetPsForDriver_stub
 	k
 	gcc
 )

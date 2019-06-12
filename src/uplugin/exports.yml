@@ -10,8 +10,8 @@ uwifimon:
     uwifimon:
       syscall: false
       functions:
-        - uwifimon_get_iface_list
-        - uwifimon_ioctl
         - uwifimon_cap_start
         - uwifimon_cap_stop
-        - uwifimon_cap_status
+        - uwifimon_net_start
+        - uwifimon_net_stop
+        - uwifimon_mod_state

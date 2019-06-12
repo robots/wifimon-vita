@@ -47,6 +47,7 @@ target_link_libraries(uwifimon
   SceShellSvc_stub
   SceSysmem_stub
   SceSysmodule_stub
+  SceNetPs_stub_weak
 )
 
 vita_create_self(${PROJECT_NAME}.suprx ${PROJECT_NAME}
@@ -57,7 +58,7 @@ vita_create_self(${PROJECT_NAME}.suprx ${PROJECT_NAME}
 vita_create_stubs(${PROJECT_NAME}-stubs ${PROJECT_NAME} ${CMAKE_SOURCE_DIR}/exports.yml
 )
 
-install(DIRECTORY ${CMAKE_BINARY_DIR}/stubs/
+install(DIRECTORY ${CMAKE_BINARY_DIR}/${PROJECT_NAME}-stubs/
   DESTINATION lib
   FILES_MATCHING PATTERN "*.a"
 )

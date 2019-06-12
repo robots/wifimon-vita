@@ -23,7 +23,6 @@ typedef struct pcaprec_hdr_s {
 
 int pcap_open(char *file);
 void pcap_close(void);
-int pcap_write_hdr(struct ieee80211_radiotap_header *rtap, uint32_t buf_len);
-int pcap_write_data(uint8_t *buf, uint32_t buf_len);
+int pcap_write_rt(struct ieee80211_radiotap_header *rtap, uint8_t *buf, uint32_t buf_len);
 
 #endif

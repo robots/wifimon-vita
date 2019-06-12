@@ -5,6 +5,8 @@
 
 SceUID pcap_fd = -1;
 
+int ksceKernelLibcGettimeofday(struct timeval *ptimeval, void *ptimezone);
+
 int pcap_open(char *file)
 {
 	if (pcap_fd > 0) {
@@ -44,7 +46,7 @@ void pcap_close(void)
 	}
 }
 
-int pcap_write_hdr(struct ieee80211_radiotap_header *rtap, uint32_t buf_len)
+int pcap_write_rt(struct ieee80211_radiotap_header *rtap, uint8_t *buf, uint32_t buf_len)
 {
 	pcaprec_hdr_t rec;
 	struct timeval tv;
@@ -70,15 +72,12 @@ int pcap_write_hdr(struct ieee80211_radiotap_header *rtap, uint32_t buf_len)
 		pcap_close();
 		return -1;
 	}
-	return 0;
-}
 
-int pcap_write_data(uint8_t *buf, uint32_t buf_len)
-{
 	if (ksceIoWriteAsync(pcap_fd, buf, buf_len) < 0) {
 		pcap_close();
 		return -1;
 	}
+
 	return 0;
 }
 
