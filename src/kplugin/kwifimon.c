@@ -18,6 +18,7 @@
 #include "knet.h"
 #include "m.h"
 
+#define MAX(x, y) ((x)>(y)?(x):(y))
 #define MIN(x, y) ((x)<(y)?(x):(y))
 #define MAX_FILELEN 200
 
@@ -26,10 +27,11 @@ static int uids[HOOKS_NUMBER];
 static int hooks_uid[HOOKS_NUMBER];
 static tai_hook_ref_t ref_hooks[HOOKS_NUMBER];
 
+SceUID kwifimon_mutex;
 uint32_t kwifimon_channel_freq;
 uint32_t kwifimon_channel_band;
-// TODO: mutex?
 volatile int kwifimon_state = 0;
+struct wifimon_stats_t kwifimon_stats;
 
 // missing taihen prototype
 int module_get_offset(SceUID pid, SceUID modid, int segidx, size_t offset, uintptr_t *addr);
@@ -40,6 +42,9 @@ int (*wlan_cmd_send2)(struct wlan_dev_t *dev, struct wlan_cmd_t *cmd, uint16_t c
 int (*wlan_cmd_wait)(struct wlan_dev_t *dev, struct wlan_cmd_t *cmd);
 struct wlan_cmd_t *(*wlan_cmd_alloc)(struct wlan_dev_t *dev, int cmd_len);
 int (*wlan_cmd_free)(struct wlan_dev_t *dev, struct wlan_cmd_t *cmd);
+
+int (*wlan_mem_read)(struct wlan_dev_t *dev, uint32_t addr, uint32_t *value);
+int (*wlan_mem_write)(struct wlan_dev_t *dev, uint32_t addr, uint32_t value);
 
 int (*wlan_lock)(struct wlan_lock_t *ptr);
 void (*wlan_unlock)(struct wlan_lock_t *ptr);
@@ -88,6 +93,28 @@ int kwifimon_cap_stop(void)
 	return ret;
 }
 
+int kwifimon_mod_stats(struct wifimon_stats_t *s, int reset)
+{
+	int state, ret;
+
+	ENTER_SYSCALL(state);
+
+	ret = ksceKernelLockMutex(kwifimon_mutex, 1, NULL);
+	if (ret >= 0) {
+		ksceKernelMemcpyKernelToUser((uintptr_t)s, &kwifimon_stats, sizeof(struct wifimon_stats_t));
+
+		if (reset) {
+			memset(&kwifimon_stats, 0, sizeof(struct wifimon_stats_t));
+		}
+
+		ret = ksceKernelUnlockMutex(kwifimon_mutex, 1);
+	}
+
+	EXIT_SYSCALL(state);
+
+	return ret;
+}
+
 int kwifimon_net_start(void)
 {
 	int state, ret;
@@ -121,8 +148,6 @@ int kwifimon_net_stop(void)
 
 int kwifimon_mac_control(struct wlan_dev_t *dev, uint16_t mode)
 {
-//	ksceKernelLockFastMutex(dev->tcmmutex);
-
 	struct wlan_cmd_t *cmd = wlan_cmd_alloc(dev, sizeof(struct wlan_mac_control_t));
 
 	if (!cmd) {
@@ -142,16 +167,12 @@ int kwifimon_mac_control(struct wlan_dev_t *dev, uint16_t mode)
 
 	wlan_cmd_free(dev, cmd);
 
-//	ksceKernelUnlockFastMutex(dev->tcmmutex);
-
 	return ret;
 }
 
 
 int kwifimon_monitor_mode(struct wlan_dev_t *dev, int mode)
 {
-//	ksceKernelLockFastMutex(dev->tcmmutex);
-
 	struct wlan_cmd_t *cmd = wlan_cmd_alloc(dev, sizeof(struct wlan_mon_t));
 
 	if (!cmd) {
@@ -171,15 +192,35 @@ int kwifimon_monitor_mode(struct wlan_dev_t *dev, int mode)
 
 	wlan_cmd_free(dev, cmd);
 
-//	ksceKernelUnlockFastMutex(dev->tcmmutex);
+	return ret;
+}
+
+int kwifimon_mgmt_reg(struct wlan_dev_t *dev, int mask)
+{
+	struct wlan_cmd_t *cmd = wlan_cmd_alloc(dev, sizeof(struct wlan_mon_t));
+
+	if (!cmd) {
+		return 0x80418005;
+	}
+
+	cmd->result_cb = 0;
+	struct wlan_mgmt_frame_reg_t *mr = (struct wlan_mgmt_frame_reg_t *)cmd->out_data;
+
+	mr->action = 1;
+	mr->mask = mask;
+
+	int ret = wlan_cmd_send2(dev, cmd, WLAN_CMD_MGMT_FRAME_REG, sizeof(struct wlan_mgmt_frame_reg_t));
+	if (ret >= 0) {
+		ret = wlan_cmd_wait(dev, cmd);
+	}
+
+	wlan_cmd_free(dev, cmd);
 
 	return ret;
 }
 
 int kwifimon_channel(struct wlan_dev_t *dev, int band, int chan)
 {
-//	ksceKernelLockFastMutex(dev->tcmmutex);
-
 	struct wlan_cmd_t *cmd = wlan_cmd_alloc(dev, sizeof(struct wlan_rf_channel_t));
 
 	if (!cmd) {
@@ -200,7 +241,30 @@ int kwifimon_channel(struct wlan_dev_t *dev, int band, int chan)
 
 	wlan_cmd_free(dev, cmd);
 
-//	ksceKernelUnlockFastMutex(dev->tcmmutex);
+	return ret;
+}
+
+int kwifimon_wlan_anycmd(struct wlan_dev_t *dev, int wlancmd, uint8_t *buf, uint8_t out_len, uint16_t in_len)
+{
+	struct wlan_cmd_t *cmd = wlan_cmd_alloc(dev, out_len);
+
+	if (!cmd) {
+		return 0x80418005;
+	}
+
+	cmd->result_cb = 0;
+	memcpy(cmd->out_data, buf, out_len);
+
+	int ret = wlan_cmd_send2(dev, cmd, wlancmd, out_len);
+	if (ret >= 0) {
+		ret = wlan_cmd_wait(dev, cmd);
+
+		if (in_len) {
+			memcpy(buf, cmd->in_data, in_len);
+		}
+	}
+
+	wlan_cmd_free(dev, cmd);
 
 	return ret;
 }
@@ -215,52 +279,68 @@ int kwifimon_process_respose(struct wlan_dev_t *dev, uint8_t *pkt, int pkt_len, 
 		return TAI_CONTINUE(int, ref_hooks[0], dev, pkt, pkt_len, somenumber);
 	}
 */
-	// pkt or amsdu
+	// data or amsdu
 	if (rxt->pkt_type == 0 || rxt->pkt_type == 10) {
 		if (kwifimon_state & (STATE_REC_FILE | STATE_REC_NET)) {
 			struct rxpd *rx_pd = (void *)pkt + sizeof(struct sdio_rx_t);
 			uint8_t *pkt = (void *)rx_pd + rx_pd->rx_pkt_offset;
 			uint32_t pkt_len = rx_pd->rx_pkt_length;
 		
-			struct rx_radiotap_hdr radiotap;
+			if (kwifimon_state & (STATE_REC_FILE | STATE_REC_NET)) {
+				struct rx_radiotap_hdr radiotap;
 
-			// fill radiotap header with known information
-			memset(&radiotap, 0, sizeof(radiotap));
+				// fill radiotap header with known information
+				memset(&radiotap, 0, sizeof(radiotap));
 
-			radiotap.hdr.it_len = sizeof(struct rx_radiotap_hdr);
-			radiotap.hdr.it_present = RX_RADIOTAP_PRESENT;
+				radiotap.hdr.it_len = sizeof(struct rx_radiotap_hdr);
+				radiotap.hdr.it_present = RX_RADIOTAP_PRESENT;
 
-			radiotap.ch_freq = kwifimon_channel_freq;
-			radiotap.ch_flags = (kwifimon_channel_band == WLAN_RADIO_TYPE_A)? IEEE80211_CHAN_5GHZ : IEEE80211_CHAN_2GHZ;
-			if (rx_pd->ht_info & 1) {
-				radiotap.mcs = rx_pd->rx_rate;
-				radiotap.mcs_known =  IEEE80211_RADIOTAP_MCS_HAVE_BW | IEEE80211_RADIOTAP_MCS_HAVE_MCS | IEEE80211_RADIOTAP_MCS_HAVE_GI;
-				radiotap.mcs_flags |= (rx_pd->ht_info & 2) ? IEEE80211_RADIOTAP_MCS_BW_40 : IEEE80211_RADIOTAP_MCS_BW_20;
-				radiotap.mcs_flags |= (rx_pd->ht_info & 3) ? IEEE80211_RADIOTAP_MCS_SGI : 0;
-			} else {
-				radiotap.rate = m_rate_to_radiotap(rx_pd->rx_rate);
+				radiotap.ch_freq = kwifimon_channel_freq;
+				radiotap.ch_flags = (kwifimon_channel_band == WLAN_RADIO_TYPE_A)? IEEE80211_CHAN_5GHZ : IEEE80211_CHAN_2GHZ;
+				if (rx_pd->ht_info & 1) {
+					radiotap.mcs = rx_pd->rx_rate;
+					radiotap.mcs_known =  IEEE80211_RADIOTAP_MCS_HAVE_BW | IEEE80211_RADIOTAP_MCS_HAVE_MCS | IEEE80211_RADIOTAP_MCS_HAVE_GI;
+					radiotap.mcs_flags |= (rx_pd->ht_info & 2) ? IEEE80211_RADIOTAP_MCS_BW_40 : IEEE80211_RADIOTAP_MCS_BW_20;
+					radiotap.mcs_flags |= (rx_pd->ht_info & 4) ? IEEE80211_RADIOTAP_MCS_SGI : 0;
+				}
+
+				radiotap.rate = MIN(255, mwifiex_index_to_data_rate(rx_pd->rx_rate, rx_pd->ht_info));
+
+				radiotap.antsignal = MIN(127, rx_pd->snr + rx_pd->nf);
+				radiotap.antnoise = rx_pd->nf;
+
+				// write to file
+				if (kwifimon_state & STATE_REC_FILE) {
+					pcap_write_rt(&radiotap.hdr, pkt, pkt_len);
+				}
+
+				if (kwifimon_state & STATE_REC_NET) {
+					knet_write_rt(&radiotap.hdr, pkt, pkt_len);
+				}
 			}
-			radiotap.antsignal = MIN(127, rx_pd->snr + rx_pd->nf);
-			radiotap.antnoise = rx_pd->nf;
 
-			// write to file
-			if (kwifimon_state & STATE_REC_FILE) {
-				pcap_write_rt(&radiotap.hdr, pkt, pkt_len);
+			int ret = ksceKernelLockMutex(kwifimon_mutex, 1, NULL);
+			if (ret >= 0) {
+				if (rx_pd->rx_pkt_type == PKT_TYPE_MGMT) {
+					kwifimon_stats.mgmt_cnt++;
+				} else if (rx_pd->rx_pkt_type == PKT_TYPE_AMSDU) {
+					kwifimon_stats.amsdu_cnt++;
+				} else if (rx_pd->rx_pkt_type == PKT_TYPE_BAR) {
+					kwifimon_stats.bar_cnt++;
+				} else {
+					kwifimon_stats.pkt_cnt++;
+				}
+
+				ksceKernelUnlockMutex(kwifimon_mutex, 1);
 			}
 
-			if (kwifimon_state & STATE_REC_NET) {
-				knet_write_rt(&radiotap.hdr, pkt, pkt_len);
+			if (rx_pd->rx_pkt_type == PKT_TYPE_MGMT) {
+				// dont pass mgmt frame, driver will ignore it, but there is allocation overhead
+				return 0;
 			}
 		}
 	}
-	
-/*	
-	if (ref_hooks[1]) {
-		return TAI_CONTINUE(int, ref_hooks[1], dev, pkt, pkt_len, somenumber);
-	} else {
-		return 0;
-	}
-*/
+
 	return TAI_CONTINUE(int, ref_hooks[1], dev, pkt, pkt_len, somenumber);
 }
 
@@ -271,6 +351,7 @@ int kwifimon_ioctl(struct netdev_t *netdev, unsigned int req, uint8_t *buf, int 
 /*	if (ref_hooks[2]) {
 		ret = TAI_CONTINUE(int, ref_hooks[2], netdev, req, buf, buf_len);
 	}*/
+
 	ret = TAI_CONTINUE(int, ref_hooks[2], netdev, req, buf, buf_len);
 	
 	struct wlan_dev_t *dev = netdev->priv;
@@ -288,8 +369,11 @@ int kwifimon_ioctl(struct netdev_t *netdev, unsigned int req, uint8_t *buf, int 
 				uint16_t mode;
 				memcpy(&mode, buf, 2);
 				ret = kwifimon_mac_control(dev, mode); 
+				if (ret >= 0) {
+					dev->current_mac_control = mode;
+				}
 			}
-		} else if (req == WLAN_IOCTL_SET_RF_CHANNEL) {
+		} /*else if (req == WLAN_IOCTL_SET_RF_CHANNEL) {
 			if (buf_len >= 4) {
 				uint16_t band;
 				uint16_t chan;
@@ -314,6 +398,34 @@ int kwifimon_ioctl(struct netdev_t *netdev, unsigned int req, uint8_t *buf, int 
 					kwifimon_state |= STATE_MONITOR;
 				}
 			}
+		} else if (req == WLAN_IOCTL_SET_MGMT_REG) {
+			if (buf_len >= 2) {
+				uint16_t mask;
+				memcpy(&mask, buf, 2);
+				ret = kwifimon_mgmt_reg(dev, mask); 
+			}
+		} */else if (req == WLAN_IOCTL_ANYCMD) {
+			uint16_t out_len, in_len, cmd;
+			if (buf_len >= 6) {
+				memcpy(&cmd, &buf[0], 2);
+				memcpy(&out_len, &buf[2], 2);
+				memcpy(&in_len, &buf[4], 2);
+				if (buf_len >= MAX(out_len, in_len) + 6) {
+					ret = kwifimon_wlan_anycmd(dev, cmd, &buf[6], out_len, in_len); 
+				}
+			}
+		} else if (req == WLAN_IOCTL_MEM) {
+			uint32_t addr, value;
+			if (buf_len >= 9) {
+				memcpy(&addr, &buf[1], 4);
+				memcpy(&value, &buf[5], 4);
+				if (buf[0] == 0) {
+					ret = wlan_mem_read(dev, addr, &value);
+				} else if (buf[0] == 1) {
+					ret = wlan_mem_read(dev, addr, value);
+				}
+				memcpy(&buf[5], &value, 4);
+			}
 		}
 
 		wlan_unlock(&dev->wlan_lock);
@@ -334,6 +446,8 @@ int unload_allowed_patched(void)
 void _start() __attribute__ ((weak, alias ("module_start")));
 int module_start(SceSize argc, const void *args)
 {
+	kwifimon_mutex = ksceKernelCreateMutex("kwifimon_mutex", 0, 0, NULL);
+
 //	hooks_uid[0] = taiHookFunctionImportForKernel(KERNEL_PID, &ref_hooks[0], "SceKernelModulemgr", 0x11F9B314, 0xBBA13D9C, unload_allowed_patched);
 	STATIC_ASSERT((sizeof(struct netdev_t) == 0xb0), "Bad size of struct netdev_t!")
 //	STATIC_ASSERT((sizeof(struct netdev_2_t) == 0x360), "Bad size of struct netdev_2_t!")
@@ -358,29 +472,17 @@ int module_start(SceSize argc, const void *args)
 	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x0E50 | 1, (uintptr_t *)&wlan_lock);
 	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x0E70 | 1, (uintptr_t *)&wlan_unlock);
 
+	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x4568 | 1, (uintptr_t *)&wlan_mem_read);
+	module_get_offset(KERNEL_PID, tai_info.modid, 0, 0x45E8 | 1, (uintptr_t *)&wlan_mem_write);
+
 	hooks_uid[1] = taiHookFunctionOffsetForKernel(KERNEL_PID, &ref_hooks[1], tai_info.modid, 0, 0x1cd4, 1, kwifimon_process_respose);
 	hooks_uid[2] = taiHookFunctionOffsetForKernel(KERNEL_PID, &ref_hooks[2], tai_info.modid, 0, 0x73f0, 1, kwifimon_ioctl);
-
-
-/* not needed
-	// second: patch SceNetPS 
-	memset(&tai_info,0,sizeof(tai_module_info_t));
-	tai_info.size = sizeof(tai_module_info_t);
-	if (taiGetModuleInfoForKernel(KERNEL_PID, "SceNetPs", &tai_info) < 0) {
-		kwifimon_state = STATE_ERROR_1;
-		return SCE_KERNEL_START_SUCCESS;
-	}
-
-	// stolen from Adrenaline
-	uint32_t movs_a1_0_nop_opcode = 0xBF002000;
-	// patch access to sceNetSyscallControl (replace bl xxx with mov R0, 0; nop)
-	uids[0] = taiInjectDataForKernel(KERNEL_PID, tai_info.modid, 0, 0x2710, &movs_a1_0_nop_opcode, sizeof(movs_a1_0_nop_opcode));
-*/
 
 	return SCE_KERNEL_START_SUCCESS;
 }
 
-int module_stop(SceSize argc, const void *args) {
+int module_stop(SceSize argc, const void *args)
+{
 	int i;
 
 	pcap_close();
@@ -396,5 +498,8 @@ int module_stop(SceSize argc, const void *args) {
 	while (i--) {
 		if (hooks_uid[i]) taiHookReleaseForKernel(hooks_uid[i], ref_hooks[i]);
 	}
+
+	ksceKernelDeleteMutex(kwifimon_mutex);
+
 	return SCE_KERNEL_STOP_SUCCESS;
 }

@@ -30,6 +30,8 @@ link_directories(
 )
 
 add_executable(${PROJECT_NAME}
+	dump.c
+	util.c
 	main.c
 	ui.c
 )

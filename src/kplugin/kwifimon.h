@@ -3,11 +3,18 @@
 
 #define PACK               __attribute__ ((packed))
 
+#define PKT_TYPE_MGMT   0xE5
+#define PKT_TYPE_AMSDU  0xE6
+#define PKT_TYPE_BAR    0xE7
+
+
 
 // wlan commands
 #define WLAN_CMD_802_11_RF_CHANNEL         0x001d
 #define WLAN_CMD_MAC_CONTROL               0x0028
 #define WLAN_CMD_802_11_MONITOR_MODE       0x0098
+#define WLAN_CMD_MGMT_FRAME_REG            0x010c
+
 
 // action
 #define HostCmd_ACT_GEN_GET                   0x0000
@@ -45,6 +52,11 @@ struct wlan_rf_channel_t {
 
 struct wlan_mac_control_t {
 	uint32_t action;
+} PACK;
+
+struct wlan_mgmt_frame_reg_t {
+  uint16_t action;
+  uint16_t mask;
 } PACK;
 
 struct sdio_rx_t {

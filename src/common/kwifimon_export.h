@@ -3,6 +3,13 @@
 
 #define KWIFIMON_NET_PORT 65111
 
+struct wifimon_stats_t {
+	uint32_t pkt_cnt;
+	uint32_t mgmt_cnt;
+	uint32_t amsdu_cnt;
+	uint32_t bar_cnt;
+};
+
 struct iface_counter_t {
   unsigned int bytes1;
   unsigned int pkts1;
@@ -62,6 +69,7 @@ enum wifi_ioctl_t {
 	WLAN_IOCTL_SCAN_RESULT       = 0x50100004,
 	WLAN_IOCTL_SET_WOL           = 0x50110001,
 	WLAN_IOCTL_DISCONNECT        = 0x50110002,
+	WLAN_IOCTL_ADHOC_STOP        = 0x50120002,
 	WLAN_IOCTL_ADHOC_CREATE      = 0x50120003,
 	WLAN_IOCTL_DO_CMD_0x00f2     = 0x60120002,
 	WLAN_IOCTL_TXRATE_CFG        = 0x60180001,
@@ -73,6 +81,9 @@ enum wifi_ioctl_t {
 	WLAN_IOCTL_SET_MAC_CONTROL   = 0x5011FF01,
 	WLAN_IOCTL_SET_RF_CHANNEL    = 0x5011FF02,
 	WLAN_IOCTL_SET_MONITOR_MODE  = 0x5011FF03,
+	WLAN_IOCTL_SET_MGMT_REG      = 0x5011FF04,
+	WLAN_IOCTL_ANYCMD            = 0x5011FF05,
+	WLAN_IOCTL_MEM               = 0x5011FF07,
 };
 
 enum kwifimon_state_t {
@@ -87,6 +98,7 @@ enum kwifimon_state_t {
 };
 
 int kwifimon_mod_state(void);
+int kwifimon_mod_stats(struct wifimon_stats_t *s, int reset);
 int kwifimon_cap_start(char *file);
 int kwifimon_cap_stop(void);
 int kwifimon_net_start(void);

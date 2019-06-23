@@ -3,7 +3,7 @@
 #include <taihen.h>
 
 //#include <kwifimon.h>
-#include "../common/kwifimon_export.h"
+#include "kwifimon_export.h"
 #include "uwifimon.h"
 
 int uwifimon_cap_start(char *file)
@@ -30,6 +30,11 @@ int uwifimon_net_stop(void)
 int uwifimon_mod_state(void)
 {
 	return kwifimon_mod_state();
+}
+
+int uwifimon_mod_stats(struct wifimon_stats_t *s, int reset)
+{
+	return kwifimon_mod_stats(s, reset);
 }
 
 void _start() __attribute__ ((weak, alias("module_start")));
