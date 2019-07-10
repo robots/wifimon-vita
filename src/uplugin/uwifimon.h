@@ -1,6 +1,8 @@
 #ifndef UWIFIMON_h_
 #define UWIFIMON_h_
 
+#include "kwifimon_export.h"
+
 int uwifimon_cap_start(char *file);
 int uwifimon_cap_stop(void);
 int uwifimon_net_start(void);

@@ -8,6 +8,7 @@ struct wifimon_stats_t {
 	uint32_t mgmt_cnt;
 	uint32_t amsdu_cnt;
 	uint32_t bar_cnt;
+	uint32_t evt_cnt;
 };
 
 struct iface_counter_t {
@@ -79,11 +80,12 @@ enum wifi_ioctl_t {
 
 	WLAN_IOCTL_GET_MAC_CONTROL   = 0x4011FF01,
 	WLAN_IOCTL_SET_MAC_CONTROL   = 0x5011FF01,
-	WLAN_IOCTL_SET_RF_CHANNEL    = 0x5011FF02,
-	WLAN_IOCTL_SET_MONITOR_MODE  = 0x5011FF03,
-	WLAN_IOCTL_SET_MGMT_REG      = 0x5011FF04,
+//	WLAN_IOCTL_SET_RF_CHANNEL    = 0x5011FF02,
+//	WLAN_IOCTL_SET_MONITOR_MODE  = 0x5011FF03,
+//	WLAN_IOCTL_SET_MGMT_REG      = 0x5011FF04,
 	WLAN_IOCTL_ANYCMD            = 0x5011FF05,
 	WLAN_IOCTL_MEM               = 0x5011FF07,
+	WLAN_IOCTL_INIT              = 0x5011FF08,
 };
 
 enum kwifimon_state_t {

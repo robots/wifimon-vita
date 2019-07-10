@@ -9,6 +9,7 @@
 #include "kwifimon_export.h"
 
 #include "ui.h"
+#include "patch.h"
 
 
 int wlan_idx = -1;
@@ -46,6 +47,7 @@ void main(void)
 {
 	int x=20,y=0;
 	int ret;
+	SceUID kmod, umod;
 
 	ui_init();
 
@@ -60,63 +62,28 @@ void main(void)
 		x = vita2d_font_draw_textf(ui_font, 20, 30, ui_color.text, 10, "Old Kernel module unload %x %s ", ret, (ret < 0)?"failed":"ok");
 	}
 */
-	SceUID kmod = taiLoadStartKernelModule("ux0:app/WIFIMON01/kwifimon.skprx", 0, NULL, 0);
-	vita2d_font_draw_textf(ui_font, x+20, 30, ui_color.text, 10, "Loading kernel module: %x %s", kmod, (kmod < 0)?"failed. Already loaded ?":"ok");
 
-	SceUID umod = sceKernelLoadStartModule("ux0:app/WIFIMON01/uwifimon.suprx", 0, NULL, 0, NULL, NULL);
-	vita2d_font_draw_textf(ui_font, 20, 40, ui_color.text, 10, "User module: %x %s", umod, (umod < 0)?"failed":"ok");
+	{
+		int search_unk[2];
+		SceUID modid = _vshKernelSearchModuleByName("kwifimon", search_unk);
+		if (modid < 0) {
+			kmod = taiLoadStartKernelModule("ux0:app/WIFIMON01/kwifimon.skprx", 0, NULL, 0);
+			vita2d_font_draw_textf(ui_font, x+20, 30, ui_color.text, 10, "Loading kernel module: %x %s", kmod, (kmod < 0)?"failed.":"ok");
+		} else {
+			vita2d_font_draw_textf(ui_font, x+20, 30, ui_color.text, 10, "Loading kernel module: already loaded");
+		}
+
+		umod = sceKernelLoadStartModule("ux0:app/WIFIMON01/uwifimon.suprx", 0, NULL, 0, NULL, NULL);
+		vita2d_font_draw_textf(ui_font, 20, 40, ui_color.text, 10, "User module: %x %s", umod, (umod < 0)?"failed":"ok");
+	}
 
 	find_wlan_idx();
 	
 	y= 50;
 
 
-/*
-	uint32_t random;
-	ret = sceNetSyscallControl(wlan_idx, 0x14, &random, 4);
-*/
 
-/*
-	{
-	uint16_t mode = 0xdead;
-	ret = 0;
-	if (wlan_idx > 0) {
-		ret = sceNetSyscallControl(wlan_idx, WLAN_IOCTL_GET_MAC_CONTROL, &mode, 2);
-	}
-
-	vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "Wlan0 idx: %d mac_control reg: 0x%x  uwifimon state 0x%x", wlan_idx, mode, uwifimon_mod_state());
-	y+=10;
-	}
-*/
-/*
-	{
-		uint32_t x = 0;
-		if (wlan_idx > 0) {
-			ret = sceNetSyscallControl(wlan_idx, WLAN_IOCTL_DISCONNECT, &x, 4);
-		}
-		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "Disconnect ret: %x  %x", ret, x);
-		y+=10;
-	}
-*/
-/*
-	{
-		uint16_t mon = 1; 
-		if (wlan_idx > 0) {
-			ret = sceNetSyscallControl(wlan_idx, WLAN_IOCTL_SET_MONITOR_MODE, &mon, 2);
-		}
-		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "Monitor mode ret: %x  %s", ret, (ret < 0)? "bad :-(": "good :-)");
-		y+=10;
-	}
-*/
-	{
-		uint16_t mask = 0x0001; 
-		if (wlan_idx > 0) {
-			ret = sceNetSyscallControl(wlan_idx, WLAN_IOCTL_SET_MGMT_REG, &mask, 2);
-		}
-		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "mgmt_reg ret: %x  %d", ret, uwifimon_mod_state());
-		y+=10;
-	}
-	/*
+#if 0
 	{
 
 		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "dump: %d", dump(0));
@@ -126,7 +93,7 @@ void main(void)
 
 		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "dump: %d", dump(1));
 		y+=10;
-	}*/
+	}
 	{
 		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "dump: %d", dump(2));
 		y+=10;
@@ -135,43 +102,73 @@ void main(void)
 		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "dump: %d", dump(3));
 		y+=10;
 	}
-/*	{
+	{
 		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "dump: %d", dump(4));
 		y+=10;
-	}*/
+	}
 /*
 	{
 		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "dump: %d", dump(5));
 		y+=10;
 	}
 	*/
-/*
+#endif
+
 	{
-		uint16_t mac = mode | 0x0080; 
-		if (wlan_idx > 0) {
-			ret = sceNetSyscallControl(wlan_idx, WLAN_IOCTL_SET_MAC_CONTROL, &mac, 2);
-		}
-		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "set mac to promisc ret: %x %x", ret, mode);
-		y+=10;
-	}
-*/
-/*
-	{
-		uint16_t mac = 0;
-		if (wlan_idx > 0) {
-			ret = sceNetSyscallControl(wlan_idx, WLAN_IOCTL_GET_MAC_CONTROL, &mac, 2);
-		}
-		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "get mac  ret: %x  %x", ret, mac);
-		y+=10;
-	}
-*/
-	{
-		struct wifimon_stats_t s;
-		ret = uwifimon_mod_stats(&s, 1);
-		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "stats ret: 0x%x pkt:%d mgmt:%d amsdu:%d bar:%d", ret, s.pkt_cnt, s.mgmt_cnt, s.amsdu_cnt, s.bar_cnt);
+		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "Disconnect %d", uwifimon_mod_state());
 		y+=10;
 	}
 
+	vita2d_end_drawing();
+	vita2d_swap_buffers();
+
+	while (1) {
+		uint32_t in = ui_get_input();
+
+		if (in & SCE_CTRL_CIRCLE) {
+			break;
+		}
+		if (in & SCE_CTRL_TRIANGLE) {
+			struct wifimon_stats_t s;
+			ret = uwifimon_mod_stats(&s, 1);
+			vita2d_start_drawing();
+			vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "stats ret: 0x%x pkt:%d mgmt:%d amsdu:%d bar:%d ev:%d", ret, s.pkt_cnt, s.mgmt_cnt, s.amsdu_cnt, s.bar_cnt, s.evt_cnt);
+			vita2d_end_drawing();
+			vita2d_swap_buffers();
+			y+=10;
+		}
+		if (in & SCE_CTRL_SQUARE) {
+			vita2d_start_drawing();
+			vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "Patching %08x", patch_do());
+			vita2d_end_drawing();
+			vita2d_swap_buffers();
+			y+=10;
+		}
+
+		if (in & SCE_CTRL_LEFT) {
+			vita2d_start_drawing();
+			vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "Start recording", uwifimon_cap_start("ux0:/data/test.cap"));
+			vita2d_end_drawing();
+			vita2d_swap_buffers();
+			y+=10;
+		}
+
+		if (in & SCE_CTRL_RIGHT) {
+			vita2d_start_drawing();
+			vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "Stop recording", uwifimon_cap_stop());
+			vita2d_end_drawing();
+			vita2d_swap_buffers();
+			y+=10;
+		}
+
+		sceKernelDelayThread(1);
+	}
+/*
+	{
+		vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "UnPatching %d", patch_undo());
+		y+=10;
+	}
+*/
 
 	ret = sceKernelStopUnloadModule(umod, 0, NULL, 0, NULL, NULL);
 	vita2d_font_draw_textf(ui_font, 20, y, ui_color.text, 10, "User unload: %x", ret);

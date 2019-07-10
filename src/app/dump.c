@@ -7,12 +7,12 @@
 #include "util.h"
 
 
-struct {
+struct seg_t {
 	uint32_t base;
 	uint32_t size;
-	char *name
+	char *name;
 } segs[] = {
-	{ 0x00000000, 0x00080000, "00seg" },// code ram (tcim)
+	{ 0x00000000, 0x00060000, "00seg" },// code ram (tcim)
 	{ 0x04000000, 0x00010000, "04seg" },// data ram (tcdm)
 	{ 0xc0000000, 0x00040000, "c0seg" },// ram
 	{ 0x03f00000, 0x00050000, "03seg" },// code rom
@@ -38,7 +38,7 @@ int dump(int i)
 	uint32_t size = 0;
 
 	while (addr < addrmax) {
-		int ret = mem_read(addr, segp);
+		int ret = mem_read(addr, (uint32_t *)segp);
 		if (ret < 0) {
 			ret = -2;
 			break;
@@ -52,7 +52,7 @@ int dump(int i)
 	char name[200];
 	SceUID fd;
 
-	sprintf(name, "ux0:data/dump-%08x-%08x.bin", segs[i].base, size);
+	sprintf(name, "ux0:data/dump-%08x-%08x.bin", (unsigned int)segs[i].base, (unsigned int)size);
 
 	if ((fd = sceIoOpen(name, SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC, 0777)) >= 0) {
 		if (sceIoWrite(fd, seg, size) >= 0) {

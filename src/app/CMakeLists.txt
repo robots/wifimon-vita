@@ -30,6 +30,7 @@ link_directories(
 )
 
 add_executable(${PROJECT_NAME}
+	patch.c
 	dump.c
 	util.c
 	main.c
@@ -52,6 +53,7 @@ target_link_libraries(${PROJECT_NAME}
 	SceCommonDialog_stub
 	SceSysmodule_stub
 	SceRegistryMgr_stub
+	SceVshBridge_stub
 	z
 	m
 	c

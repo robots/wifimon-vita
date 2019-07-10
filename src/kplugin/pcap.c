@@ -13,7 +13,7 @@ int pcap_open(char *file)
 		pcap_close();
 	}
 
-	pcap_fd = ksceIoOpen(file, SCE_O_WRONLY|SCE_O_CREAT, 0777);
+	pcap_fd = ksceIoOpen(file, SCE_O_WRONLY|SCE_O_CREAT|SCE_O_TRUNC, 0777);
 
 	if (pcap_fd < 0) {
 		return -1;
@@ -40,10 +40,39 @@ int pcap_open(char *file)
 void pcap_close(void)
 {
 	if (pcap_fd >= 0) {
-		ksceIoSyncByFd(pcap_fd);
 		ksceIoClose(pcap_fd);
 		pcap_fd = -1;
 	}
+}
+
+int pcap_write_raw(uint8_t *buf, uint32_t buf_len)
+{
+	pcaprec_hdr_t rec;
+	struct timeval tv;
+	struct timezone tz;
+
+	if (pcap_fd < 0) {
+		return 0;
+	}
+
+	ksceKernelLibcGettimeofday(&tv, &tz);
+
+	rec.ts_sec = tv.tv_sec;
+	rec.ts_usec = tv.tv_usec;
+	rec.incl_len = buf_len;
+	rec.orig_len = buf_len;
+
+	if (ksceIoWrite(pcap_fd, &rec, sizeof(rec)) < 0) {
+		pcap_close();
+		return -1;
+	}
+
+	if (ksceIoWrite(pcap_fd, buf, buf_len) < 0) {
+		pcap_close();
+		return -1;
+	}
+
+	return 0;
 }
 
 int pcap_write_rt(struct ieee80211_radiotap_header *rtap, uint8_t *buf, uint32_t buf_len)
